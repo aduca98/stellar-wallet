@@ -1,0 +1,107 @@
+<html>  
+    
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+</head>
+
+<body>  
+
+    <h1>Hello World</h1>
+
+    <input id="privateKey" style="height: 30px; width: 300px" value="SA5KMK3I7LH6WLRB4WXYOOD7EM5QQEU2YU4NHQND64CL6RWURMXVMLOC" placeholder="Private key" />
+
+    <ul id="balances">
+    </ul>
+
+    <button onclick="StellarController.fetchBalance()">Fetch Balance</button>
+
+</body>
+<script src="stellar-sdk.min.js"></script>
+<script>
+    var assetCode = "TEST";
+    var assetIssuer = "GCUFROEJEJUKHNGXSH3PYLYO44IPIAKHWQFQYN73C37X74VEAY6WIOGM";
+
+    var $privateKey = $("#privateKey");
+    var $balances = $("#balances");
+    const server = new StellarSdk.Server('https://horizon-testnet.stellar.org');
+    StellarSdk.Network.useTestNetwork();
+
+    var StellarController = {
+        fetchAccount: function(cb) {
+            const pk = $privateKey.val();
+            console.log(pk);
+            const kp = StellarSdk.Keypair.fromSecret(pk);
+            console.log(kp);
+            console.log(kp.publicKey());
+            server.loadAccount(kp.publicKey())
+            .then(function(acct){
+                cb(acct);
+            });
+        },
+        fetchBalance: function() {
+            StellarController.fetchAccount(function(acct) {
+                const balances = acct.balances;
+                console.log(balances);
+                
+                var balancesWeCareAbout = [];
+                var foundAsset = false;
+                for(var i = 0; i < balances.length; i++) {
+                    var b = balances[i];
+                    if(b.asset_code === assetCode) {
+                        balancesWeCareAbout.push(b);
+                        foundAsset = true;
+                    } 
+                    if(b.asset_type === "native") {
+                        b.asset_code = "XLM";
+                        balancesWeCareAbout.push(b);
+                    }
+                }
+
+                if(!foundAsset) {
+                    StellarController.createTrustline(function(res) {
+                        $balances.empty();
+                        
+                        // Added asset so need to add to balances we care about    
+                        // Treating this as a stack...
+                        balancesWeCareAbout.push({asset_code: assetCode, balance: "0.0000000"});
+                        var len = balancesWeCareAbout.length;
+                        for(var i = 0; i < len; i++) {
+                            var b = balancesWeCareAbout.pop();
+                            $balances.append(`<li> ${b.balance} of ${b.asset_code}`);
+                        }
+
+                        return;
+                        
+                    }, function(err) {
+                        console.error(err);
+                    });
+                }
+                
+                $balances.empty();
+
+                for(var i = 0; i < balancesWeCareAbout.length; i++) {
+                    var b = balancesWeCareAbout[i];
+                    $balances.append(`<li> ${b.balance} of ${b.asset_code}`);
+                }
+            });
+        },
+        createTrustline: function(cb, errcb) {
+            StellarController.fetchAccount(function(acct) {
+                var tx = new StellarSdk.TransactionBuilder(acct)
+                    .addOperation(StellarSdk.Operation.changeTrust({
+                        asset: new StellarSdk.Asset(assetCode,assetIssuer)
+                    })).build();
+                console.log("TRANS " + tx);
+                const pk = $privateKey.val();
+                console.log("PK " + pk);
+                const kp = StellarSdk.Keypair.fromSecret(pk);
+                tx.sign(kp);
+                console.log("TX ENV " + tx.toEnvelope());
+                server.submitTransaction(tx)
+                .then(function(res) { return cb(res) })
+                .catch(function(err) { return errcb(err) });
+            });
+        }
+    }
+</script>
+</html>
